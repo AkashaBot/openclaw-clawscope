@@ -1364,7 +1364,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/activity') {
     try {
-      const { stdout } = await exec('openclaw logs --json --limit 100', { cwd: process.cwd(), timeout: 8000 });
+      let stdout = '';
+      try {
+        const result = await exec('openclaw logs --json --limit 100', { cwd: process.cwd(), timeout: 12000 });
+        stdout = result.stdout;
+      } catch (e: any) {
+        // exec throws on stderr, but stdout may still be valid
+        stdout = e?.stdout || '';
+      }
       // Strip ANSI and parse JSON lines
       const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const lines = cleanStdout.split('\n');
@@ -1488,7 +1495,14 @@ const server = http.createServer(async (req, res) => {
     const limit = parseInt(url.searchParams.get('limit') || '50', 10); // Reduced from 100
     
     try {
-      const { stdout } = await exec('openclaw logs --json --limit ' + limit, { cwd: process.cwd(), timeout: 10000 }); // Reduced from 30000
+      let stdout = '';
+      try {
+        const result = await exec('openclaw logs --json --limit ' + limit, { cwd: process.cwd(), timeout: 15000 });
+        stdout = result.stdout;
+      } catch (e: any) {
+        // exec throws on stderr, but stdout may still be valid
+        stdout = e?.stdout || '';
+      }
       const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const lines = cleanStdout.split('\n');
       const events: any[] = [];
