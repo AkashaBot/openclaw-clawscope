@@ -1,0 +1,22 @@
+{
+  "name": "openclaw-clawscope",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/server.js",
+    "dev": "ts-node-esm src/server.ts"
+  },
+  "dependencies": {
+    "@akashabot/openclaw-memory-offline-core": "^0.5.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}
