@@ -244,8 +244,19 @@ const timelineHtml = String.raw`<!DOCTYPE html>
     function getStatus() {
       try {
         const raw = localStorage.getItem(CACHE_KEY);
-        return raw ? JSON.parse(raw) : { events: [], lastFetch: 0, lastTs: null };
-      } catch { return { events: [], lastFetch: 0, lastTs: null }; }
+        if (!raw) return { events: [], lastFetch: 0, lastTs: null };
+        const parsed = JSON.parse(raw);
+        // Validate cache structure
+        if (!parsed || !Array.isArray(parsed.events)) {
+          localStorage.removeItem(CACHE_KEY);
+          return { events: [], lastFetch: 0, lastTs: null };
+        }
+        return parsed;
+      } catch (e) {
+        console.error('[timeline] cache error:', e);
+        localStorage.removeItem(CACHE_KEY);
+        return { events: [], lastFetch: 0, lastTs: null };
+      }
     }
 
     function setStatus(data) {
@@ -369,6 +380,7 @@ const timelineHtml = String.raw`<!DOCTYPE html>
     }
 
     async function loadTimeline(forceRefresh = false) {
+      console.log('[timeline] loadTimeline called, forceRefresh=', forceRefresh);
       const cache = getStatus();
       const now = Date.now();
       const daysAgo = parseInt(daysFilter.value) || 7;
@@ -376,21 +388,36 @@ const timelineHtml = String.raw`<!DOCTYPE html>
 
       // Use cache if fresh and not forcing refresh
       if (!forceRefresh && cache.lastFetch > 0 && (now - cache.lastFetch) < CACHE_TTL_MS) {
+        console.log('[timeline] using cache, events=', cache.events.length);
         renderTimeline(cache.events, kindFilter.value);
         showStatus('From cache (' + cache.events.length + ' events)', false);
         return;
       }
 
+      console.log('[timeline] fetching from server...');
       showStatus('Fetching...', false);
       timelineEl.innerHTML = '<div class="loading"><span class="spinner"></span> Loading timeline...</div>';
 
       try {
         // Fetch with since parameter for incremental update
-        const url = '/timeline-data?since=' + encodeURIComponent(since);
-        const resp = await fetch(url);
+        const url = '/timeline-data?since=' + encodeURIComponent(since) + '&limit=100';
+        console.log('[timeline] fetch url=', url);
+        
+        // Add timeout to fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          console.log('[timeline] fetch timeout, aborting');
+          controller.abort();
+        }, 8000);
+        
+        const resp = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        console.log('[timeline] fetch response status=', resp.status);
+        
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
         const newEvents = await resp.json();
+        console.log('[timeline] received events=', newEvents.length);
         
         // Merge with cached events (dedupe by id)
         const eventMap = new Map();
@@ -410,12 +437,13 @@ const timelineHtml = String.raw`<!DOCTYPE html>
         renderTimeline(trimmed, kindFilter.value);
         showStatus('Updated (' + newEvents.length + ' new, ' + trimmed.length + ' total)', false);
       } catch (err) {
+        console.error('[timeline] error:', err);
         showStatus('Error: ' + err.message, true);
         // Fall back to cache if available
         if (cache.events.length) {
           renderTimeline(cache.events, kindFilter.value);
         } else {
-          timelineEl.innerHTML = '<div class="empty">Failed to load timeline</div>';
+          timelineEl.innerHTML = '<div class="empty">Failed to load timeline: ' + err.message + '</div>';
         }
       }
     }
@@ -437,7 +465,7 @@ const timelineHtml = String.raw`<!DOCTYPE html>
 
     // P1: Auto-refresh toggle (default OFF)
     let autoRefreshInterval = null;
-    const autoRefreshCb = document.getElementById('auto-refresh');
+    // autoRefreshCb already declared above
     if (autoRefreshCb) {
       autoRefreshCb.addEventListener('change', () => {
         if (autoRefreshCb.checked) {
