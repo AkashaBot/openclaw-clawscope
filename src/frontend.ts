@@ -400,7 +400,7 @@ const timelineHtml = String.raw`<!DOCTYPE html>
 
       try {
         // Fetch with since parameter for incremental update
-        const url = '/timeline-data?since=' + encodeURIComponent(since) + '&limit=100';
+        const url = '/timeline-data?since=' + encodeURIComponent(since) + '&limit=50'; // Reduced from 100
         console.log('[timeline] fetch url=', url);
         
         // Add timeout to fetch
@@ -408,7 +408,7 @@ const timelineHtml = String.raw`<!DOCTYPE html>
         const timeoutId = setTimeout(() => {
           console.log('[timeline] fetch timeout, aborting');
           controller.abort();
-        }, 8000);
+        }, 15000); // Increased from 8s to 15s
         
         const resp = await fetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);
@@ -1485,7 +1485,7 @@ const server = http.createServer(async (req, res) => {
   // Timeline data endpoint (JSON with since filter)
   if (req.method === 'GET' && url.pathname === '/timeline-data') {
     const since = url.searchParams.get('since') || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const limit = parseInt(url.searchParams.get('limit') || '100', 10); // Reduced from 500
+    const limit = parseInt(url.searchParams.get('limit') || '50', 10); // Reduced from 100
     
     try {
       const { stdout } = await exec('openclaw logs --json --limit ' + limit, { cwd: process.cwd(), timeout: 10000 }); // Reduced from 30000
