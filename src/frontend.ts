@@ -560,6 +560,14 @@ const graphHtml = String.raw`<!DOCTYPE html>
       currentData = data;
       graphEl.innerHTML = '';
       
+      // Transform edges: from/to → source/target for D3
+      data.edges = data.edges.map(e => ({
+        source: e.from,
+        target: e.to,
+        label: e.label,
+        confidence: e.confidence
+      }));
+      
       const width = graphEl.clientWidth;
       const height = graphEl.clientHeight;
       
@@ -597,7 +605,11 @@ const graphHtml = String.raw`<!DOCTYPE html>
 
       node.append('circle')
         .attr('r', d => {
-          const connections = data.edges.filter(e => e.from === d.id || e.to === d.id).length;
+          const connections = data.edges.filter(e => {
+            const src = typeof e.source === 'object' ? e.source.id : e.source;
+            const tgt = typeof e.target === 'object' ? e.target.id : e.target;
+            return src === d.id || tgt === d.id;
+          }).length;
           return Math.max(8, Math.min(25, 8 + connections * 2));
         });
 
@@ -646,10 +658,16 @@ const graphHtml = String.raw`<!DOCTYPE html>
     }
 
     function showNodeDetails(d, data) {
-      const edges = data.edges.filter(e => e.from === d.id || e.to === d.id);
+      const edges = data.edges.filter(e => {
+        const src = typeof e.source === 'object' ? e.source.id : e.source;
+        const tgt = typeof e.target === 'object' ? e.target.id : e.target;
+        return src === d.id || tgt === d.id;
+      });
       detailsTitle.textContent = d.label;
       detailsList.innerHTML = edges.map(e => {
-        const arrow = e.from === d.id ? '→ ' + e.to : '← ' + e.from;
+        const src = typeof e.source === 'object' ? e.source.id : e.source;
+        const tgt = typeof e.target === 'object' ? e.target.id : e.target;
+        const arrow = src === d.id ? '→ ' + tgt : '← ' + src;
         return '<li>' + e.label + ' ' + arrow + ' <span style="color:#6b7280;">(' + (e.confidence * 100).toFixed(0) + '%)</span></li>';
       }).join('');
       nodeDetails.style.display = 'block';
@@ -1318,7 +1336,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/activity') {
     try {
-      const { stdout } = await exec('openclaw logs --json --limit 100', { cwd: process.cwd(), timeout: 30000 });
+      const { stdout } = await exec('openclaw logs --json --limit 100', { cwd: process.cwd(), timeout: 8000 });
       // Strip ANSI and parse JSON lines
       const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const lines = cleanStdout.split('\n');
@@ -1439,9 +1457,10 @@ const server = http.createServer(async (req, res) => {
   // Timeline data endpoint (JSON with since filter)
   if (req.method === 'GET' && url.pathname === '/timeline-data') {
     const since = url.searchParams.get('since') || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const limit = parseInt(url.searchParams.get('limit') || '100', 10); // Reduced from 500
     
     try {
-      const { stdout } = await exec('openclaw logs --json --limit 500', { cwd: process.cwd(), timeout: 30000 });
+      const { stdout } = await exec('openclaw logs --json --limit ' + limit, { cwd: process.cwd(), timeout: 10000 }); // Reduced from 30000
       const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const lines = cleanStdout.split('\n');
       const events: any[] = [];
