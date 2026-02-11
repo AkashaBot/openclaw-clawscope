@@ -27,6 +27,7 @@ export type SearchItem = {
 
 export interface SearchBackend {
   search(req: SearchRequest): Promise<SearchItem[]>;
+  getCategories?(): Promise<{ tag: string; count: number }[]>;
 }
 
 /**

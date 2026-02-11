@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   openDb,
   initSchema,
+  runMigrations,
   searchItems,
   hybridSearch,
   type MemConfig,
@@ -60,7 +61,8 @@ export class OfflineSqliteSearchBackend implements SearchBackend {
     if (!query) return [];
 
     const db = openDb(this.cfg.dbPath);
-    initSchema(db);
+    runMigrations(db); // Run migrations FIRST to add missing columns
+    initSchema(db);    // Then init schema (creates indexes)
 
     if (mode === 'lexical') {
       return this.searchLexical(db, query, limit);
@@ -139,10 +141,39 @@ export class OfflineSqliteSearchBackend implements SearchBackend {
       } satisfies SearchItem;
     });
   }
+
+  async getCategories(): Promise<{ tag: string; count: number }[]> {
+    return getMemoryCategories(this.cfg.dbPath);
+  }
 }
 
 function buildSnippet(text: string, maxLen = 220): string {
   const singleLine = text.replace(/\s+/g, ' ').trim();
   if (singleLine.length <= maxLen) return singleLine;
   return singleLine.slice(0, maxLen) + '…';
+}
+
+// Get all unique tags/categories from memory
+export async function getMemoryCategories(dbPath?: string): Promise<{ tag: string; count: number }[]> {
+  const db = openDb(dbPath ?? defaultDbPath());
+  runMigrations(db); // Run migrations FIRST to add missing columns
+  initSchema(db);    // Then init schema (creates indexes)
+  
+  const rows = db.prepare(`
+    SELECT tags FROM items WHERE tags IS NOT NULL AND tags != ''
+  `).all() as { tags: string }[];
+  
+  const tagCounts = new Map<string, number>();
+  
+  for (const row of rows) {
+    const tags = (row.tags || '').split(',').map((t: string) => t.trim().toLowerCase()).filter(Boolean);
+    for (const tag of tags) {
+      tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+    }
+  }
+  
+  // Sort by count descending
+  return Array.from(tagCounts.entries())
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count);
 }

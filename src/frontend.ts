@@ -861,6 +861,14 @@ const html = String.raw`<!DOCTYPE html>
           </div>
           <div id="tasks-detail" style="margin-top:0.5rem; font-size:0.75rem; color:#9ca3af; border-top:1px solid #111827; padding-top:0.4rem;"></div>
         </section>
+        <section id="categories" style="border:1px solid #111827; border-radius:0.5rem; padding:0.75rem 0.9rem; background:#020617;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+            <h2 style="font-size:0.9rem; font-weight:600; margin:0; color:#e5e7eb;">Categories</h2>
+          </div>
+          <div id="categories-list" class="scroll-panel" style="display:flex; flex-wrap:wrap; gap:0.35rem; font-size:0.75rem;">
+            <div class="empty">No categories loaded.</div>
+          </div>
+        </section>
       </div>
     </div>
   </main>
@@ -970,6 +978,7 @@ const html = String.raw`<!DOCTYPE html>
     try { loadSessions(); } catch (e) { console.error('[MC] loadSessions error:', e); }
     try { loadActivity(); } catch (e) { console.error('[MC] loadActivity error:', e); }
     try { loadTasks(); } catch (e) { console.error('[MC] loadTasks error:', e); }
+    try { loadCategories(); } catch (e) { console.error('[MC] loadCategories error:', e); }
 
     if (!form) {
       console.error('[MC] search form not found, aborting listener setup');
@@ -1293,6 +1302,44 @@ const html = String.raw`<!DOCTYPE html>
       tasksDetail.innerHTML = '<div style="font-size:0.7rem;color:#9ca3af;">Task details:</div>' +
         '<pre style="margin:0.15rem 0 0; white-space:pre-wrap; font-size:0.7rem; background:#020617;border:1px solid #111827;border-radius:4px;padding:0.4rem;">' + safe + '</pre>';
     }
+
+    async function loadCategories() {
+      const categoriesList = document.getElementById('categories-list');
+      if (!categoriesList) return;
+
+      try {
+        const resp = await fetch('/memory/categories');
+        if (!resp.ok) {
+          categoriesList.innerHTML = '<div class="empty">Failed to load categories</div>';
+          return;
+        }
+        const categories = await resp.json();
+        if (!Array.isArray(categories) || categories.length === 0) {
+          categoriesList.innerHTML = '<div class="empty">No categories found</div>';
+          return;
+        }
+
+        // Display top 20 categories as clickable chips
+        categoriesList.innerHTML = categories.slice(0, 20).map(cat =>
+          '<button class="category-chip" data-tag="' + escapeHtml(cat.tag) + '" style="background:#1f2937;border:1px solid #374151;color:#e5e7eb;padding:0.2rem 0.5rem;border-radius:0.25rem;cursor:pointer;font-size:0.7rem;">' +
+          escapeHtml(cat.tag) + ' <span style="color:#6b7280;">(' + cat.count + ')</span></button>'
+        ).join('');
+
+        // Add click handlers
+        categoriesList.querySelectorAll('.category-chip').forEach(chip => {
+          chip.addEventListener('click', () => {
+            const tag = chip.getAttribute('data-tag');
+            if (tag && input) {
+              input.value = tag;
+              if (form) form.dispatchEvent(new Event('submit'));
+            }
+          });
+        });
+      } catch (e) {
+        console.error('[MC] loadCategories error:', e);
+        categoriesList.innerHTML = '<div class="empty">Error loading categories</div>';
+      }
+    }
   </script>
 </body>
 </html>`;
@@ -1358,6 +1405,26 @@ const server = http.createServer(async (req, res) => {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ error: err?.message || 'search failed' }));
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/memory/categories') {
+    try {
+      if (!backend.getCategories) {
+        res.statusCode = 501;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Categories not supported by backend' }));
+        return;
+      }
+      const categories = await backend.getCategories();
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(categories, null, 2));
+    } catch (err: any) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: err?.message || 'failed to get categories' }));
     }
     return;
   }
