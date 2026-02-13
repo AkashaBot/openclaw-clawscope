@@ -1347,6 +1347,44 @@ const html = String.raw`<!DOCTYPE html>
 </body>
 </html>`;
 
+const pluginBaseUrl = process.env.CLAWSCOPE_PLUGIN_BASE_URL || process.env.OPENCLAW_HTTP_BASE || process.env.OPENCLAW_GATEWAY_URL || 'http://127.0.0.1:3000';
+
+function formatSchedule(schedule: any): string {
+  if (!schedule) return 'unknown';
+  if (schedule.kind === 'cron') return schedule.expr || 'cron';
+  if (schedule.kind === 'every') {
+    const mins = Math.round(((schedule.everyMs || 0) / 60000));
+    return mins ? `every ${mins}min` : 'every';
+  }
+  if (schedule.kind === 'at') return schedule.at ? `once at ${schedule.at}` : 'once';
+  return 'unknown';
+}
+
+async function fetchTasksFromPlugin(): Promise<any[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const url = new URL('/clawscope/cron?includeDisabled=true', pluginBaseUrl).toString();
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+    if (!resp.ok) throw new Error(`plugin ${resp.status}`);
+    const data = await resp.json();
+    const jobs = Array.isArray(data) ? data : (data.jobs || []);
+    return jobs.map((job: any) => ({
+      id: job.id,
+      name: job.name,
+      enabled: job.enabled !== false,
+      schedule: formatSchedule(job.schedule),
+      nextRun: job.nextRunAt || null,
+      agentId: job.agentId || job.owner || null,
+      kind: job.kind,
+      description: job.description,
+      payloadSummary: job.payloadSummary
+    }));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     res.statusCode = 400;
@@ -1522,31 +1560,38 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/tasks') {
     try {
-      const { stdout } = await exec('openclaw cron list --json', { cwd: process.cwd() });
-      // Strip ANSI and find JSON start
-      const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
-      const jsonStart = cleanStdout.search(/[\[{]/);
-      const jsonStr = jsonStart >= 0 ? cleanStdout.slice(jsonStart) : cleanStdout;
-      const data = JSON.parse(jsonStr);
-      // Transform cron jobs to task format
-      const jobs = data.jobs || [];
-      const items = jobs.map((job: any) => ({
-        id: job.id,
-        name: job.name,
-        enabled: job.enabled,
-        schedule: job.schedule?.kind === 'cron' ? job.schedule.expr :
-                  job.schedule?.kind === 'every' ? `every ${Math.round((job.schedule.everyMs || 0) / 60000)}min` :
-                  job.schedule?.kind === 'at' ? `once at ${job.schedule.at}` : 'unknown',
-        nextRun: job.nextRunAt || null,
-        agentId: job.agentId
-      }));
+      // Prefer plugin endpoint (OpenClaw HTTP) if available
+      const items = await fetchTasksFromPlugin();
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(items, null, 2));
     } catch (err: any) {
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: err?.message || 'tasks failed' }));
+      // Fallback to CLI if plugin not reachable
+      try {
+        const { stdout } = await exec('openclaw cron list --json', { cwd: process.cwd() });
+        const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
+        const jsonStart = cleanStdout.search(/[\[{]/);
+        const jsonStr = jsonStart >= 0 ? cleanStdout.slice(jsonStart) : cleanStdout;
+        const data = JSON.parse(jsonStr);
+        const jobs = data.jobs || [];
+        const items = jobs.map((job: any) => ({
+          id: job.id,
+          name: job.name,
+          enabled: job.enabled !== false,
+          schedule: job.schedule?.kind === 'cron' ? job.schedule.expr :
+                    job.schedule?.kind === 'every' ? `every ${Math.round((job.schedule.everyMs || 0) / 60000)}min` :
+                    job.schedule?.kind === 'at' ? `once at ${job.schedule.at}` : 'unknown',
+          nextRun: job.nextRunAt || null,
+          agentId: job.agentId
+        }));
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(items, null, 2));
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: e?.message || err?.message || 'tasks failed' }));
+      }
     }
     return;
   }
