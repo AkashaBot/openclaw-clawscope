@@ -5,6 +5,7 @@ import http from 'http';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { exec as cpExec } from 'child_process';
 function promisifyExec(fn: any) {
   return (...args: any[]) =>
@@ -22,7 +23,7 @@ import { OfflineSqliteSearchBackend } from './offline-sqlite-backend.js';
 import type { SearchBackend, SearchMode } from './search.js';
 import { InMemoryActivityBackend } from './activity-backend.js';
 import { InMemoryTaskBackend } from './tasks-backend.js';
-import { getGraphStats, getEntityGraph, getAllFacts, exportGraphJson } from '@akashabot/openclaw-memory-offline-core';
+import { getGraphStats, getEntityGraph, getAllFacts, exportGraphJson, extractFactsSimple, insertFact, deleteFactsBySourceItem, openDb, initSchema, runMigrations } from '@akashabot/openclaw-memory-offline-core';
 import Database from 'better-sqlite3';
 
 const exec = promisifyExec(cpExec);
@@ -1910,6 +1911,14 @@ const server = http.createServer(async (req, res) => {
       </div>
 
       <div class="settings-card">
+        <h3>🧩 Fact Extraction</h3>
+        <p>Rebuild the facts table from all stored memories.</p>
+        <button class="btn" id="extractFactsBtn">Extract facts now</button>
+        <span id="extractStatus" class="status-pill status-warn" style="margin-left:0.5rem; display:none;">…</span>
+        <div class="hint">This can take a bit on large databases.</div>
+      </div>
+
+      <div class="settings-card">
         <h3>📊 Current Status</h3>
         <p>Loaded from memory database.</p>
         <div id="status-info" class="config-block">
@@ -1957,7 +1966,36 @@ const server = http.createServer(async (req, res) => {
       setTimeout(() => { overlay.style.display = 'none'; btn.disabled = false; }, 4000);
     }
 
+    async function extractFacts() {
+      const btn = document.getElementById('extractFactsBtn');
+      const status = document.getElementById('extractStatus');
+      const overlay = document.getElementById('restartOverlay');
+      btn.disabled = true;
+      overlay.style.display = 'flex';
+      overlay.querySelector('.box').textContent = 'Extracting facts… please wait';
+      status.style.display = 'inline-block';
+      status.textContent = 'Running';
+      status.className = 'status-pill status-warn';
+      try {
+        const res = await fetch('/facts/extract', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          status.textContent = `Done (${data.factsInserted || 0} facts)`;
+          status.className = 'status-pill status-ok';
+        } else {
+          status.textContent = 'Error';
+          status.className = 'status-pill status-warn';
+        }
+      } catch (e) {
+        status.textContent = 'Error';
+        status.className = 'status-pill status-warn';
+      }
+      setTimeout(() => { status.style.display = 'none'; }, 3000);
+      setTimeout(() => { overlay.style.display = 'none'; btn.disabled = false; }, 1000);
+    }
+
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
+    document.getElementById('extractFactsBtn').addEventListener('click', extractFacts);
 
     (async () => {
       try {
@@ -2015,6 +2053,54 @@ const server = http.createServer(async (req, res) => {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ error: err?.message || 'save failed' }));
+    }
+    return;
+  }
+
+  // Facts batch extraction
+  if (req.method === 'POST' && url.pathname === '/facts/extract') {
+    try {
+      const dbPath = path.join(os.homedir(), '.openclaw', 'memory', 'offline.sqlite');
+      const db = openDb(dbPath);
+      runMigrations(db);
+      initSchema(db);
+
+      const rows = db.prepare('SELECT id, text, entity_id, created_at FROM items').all() as any[];
+      let factsInserted = 0;
+      let itemsProcessed = 0;
+
+      for (const row of rows) {
+        const text = String(row.text || '');
+        if (!text.trim()) continue;
+        const entityId = row.entity_id || undefined;
+
+        // replace existing facts for this item
+        deleteFactsBySourceItem(db, String(row.id));
+
+        const facts = extractFactsSimple(text, entityId);
+        for (const f of facts) {
+          insertFact(db, {
+            id: crypto.randomUUID(),
+            created_at: row.created_at || Date.now(),
+            subject: f.subject,
+            predicate: f.predicate,
+            object: f.object,
+            confidence: f.confidence,
+            source_item_id: String(row.id),
+            entity_id: entityId
+          });
+          factsInserted++;
+        }
+        itemsProcessed++;
+      }
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: true, itemsProcessed, factsInserted }));
+    } catch (err: any) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: err?.message || 'extract failed' }));
     }
     return;
   }
