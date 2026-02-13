@@ -1484,8 +1484,9 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/memory/search') {
     const q = url.searchParams.get('q') || '';
-    const mode = (url.searchParams.get('mode') as SearchMode | null) || 'hybrid';
-    const limit = parseInt(url.searchParams.get('limit') || '20', 10);
+    const cfg = loadLocalSettings();
+    const mode = (url.searchParams.get('mode') as SearchMode | null) || cfg.mode || 'hybrid';
+    const limit = parseInt(url.searchParams.get('limit') || String(cfg.topK || 20), 10);
 
     try {
       const items = await backend.search({ query: q, mode, limit });
@@ -1858,7 +1859,7 @@ const server = http.createServer(async (req, res) => {
             <option value="ner">ner (BERT)</option>
             <option value="hybrid">hybrid (simple + ner)</option>
           </select>
-          <div class="hint">Saved locally for ClawScope only.</div>
+          <div class="hint">Info-only (OpenClaw plugin config needed to apply).</div>
         </div>
       </div>
 
@@ -1871,10 +1872,12 @@ const server = http.createServer(async (req, res) => {
             <option value="lexical">lexical</option>
             <option value="hybrid">hybrid</option>
           </select>
+          <div class="hint">Appliqué par défaut aux recherches ClawScope.</div>
         </div>
         <div class="field-row">
           <label for="topK">topK</label>
           <input id="topK" type="text" placeholder="e.g. 5" />
+          <div class="hint">Appliqué comme limite par défaut.</div>
         </div>
       </div>
 
