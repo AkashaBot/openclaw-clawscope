@@ -1385,6 +1385,32 @@ async function fetchTasksFromPlugin(): Promise<any[]> {
   }
 }
 
+async function fetchSessionsFromPlugin(): Promise<any> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const url = new URL('/clawscope/sessions', pluginBaseUrl).toString();
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+    if (!resp.ok) throw new Error(`plugin ${resp.status}`);
+    return await resp.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchActivityFromPlugin(limit = 100): Promise<any> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const url = new URL('/clawscope/activity?limit=' + limit, pluginBaseUrl).toString();
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+    if (!resp.ok) throw new Error(`plugin ${resp.status}`);
+    return await resp.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     res.statusCode = 400;
@@ -1411,23 +1437,30 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      const { stdout } = await exec('openclaw sessions --json', { cwd: process.cwd() });
-      // Strip ANSI escape codes from CLI output
-      const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
-      // Find the start of JSON (first [ or {)
-      const jsonStart = cleanStdout.search(/[\[{]/);
-      const jsonStr = jsonStart >= 0 ? cleanStdout.slice(jsonStart) : cleanStdout;
-      const data = JSON.parse(jsonStr);
+      const data = await fetchSessionsFromPlugin();
       lastSessionsJson = data;
       lastSessionsAt = now;
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(data, null, 2));
     } catch (err: any) {
-      // Return empty array on error instead of failing
-      res.statusCode = 200;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify([], null, 2));
+      // Fallback to CLI
+      try {
+        const { stdout } = await exec('openclaw sessions --json', { cwd: process.cwd() });
+        const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
+        const jsonStart = cleanStdout.search(/[\[{]/);
+        const jsonStr = jsonStart >= 0 ? cleanStdout.slice(jsonStart) : cleanStdout;
+        const data = JSON.parse(jsonStr);
+        lastSessionsJson = data;
+        lastSessionsAt = now;
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(data, null, 2));
+      } catch (e: any) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify([], null, 2));
+      }
     }
     return;
   }
@@ -1472,31 +1505,46 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/activity') {
     try {
-      let stdout = '';
+      let data: any = null;
       try {
-        const result = await exec('openclaw logs --json --limit 100', { cwd: process.cwd(), timeout: 12000 });
-        stdout = result.stdout;
+        data = await fetchActivityFromPlugin(200);
       } catch (e: any) {
-        // exec throws on stderr, but stdout may still be valid
-        stdout = e?.stdout || '';
+        data = null;
       }
+
+      let lines: string[] = [];
+      if (Array.isArray(data)) {
+        lines = data.map((x) => (typeof x === 'string' ? x : JSON.stringify(x)));
+      } else if (data && Array.isArray(data.lines)) {
+        lines = data.lines;
+      } else if (data && Array.isArray(data.logs)) {
+        lines = data.logs.map((x: any) => (typeof x === 'string' ? x : JSON.stringify(x)));
+      }
+
+      // Fallback to CLI if plugin not reachable or empty
+      if (!lines.length) {
+        let stdout = '';
+        try {
+          const result = await exec('openclaw logs --json --limit 100', { cwd: process.cwd(), timeout: 12000 });
+          stdout = result.stdout;
+        } catch (e: any) {
+          stdout = e?.stdout || '';
+        }
+        const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
+        lines = cleanStdout.split('\n').filter(Boolean);
+      }
+
       // Strip ANSI and parse JSON lines
-      const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
-      const lines = cleanStdout.split('\n');
       const events: any[] = [];
-      
       for (const line of lines) {
         if (!line.trim() || !line.startsWith('{')) continue;
         try {
           const parsed = JSON.parse(line);
-          if (parsed.type !== 'log') continue;
-          
-          // Extract meaningful events
+          if (parsed.type && parsed.type !== 'log') continue;
           const subsystem = parsed.subsystem || '';
           const message = parsed.message || '';
           const level = parsed.level || 'debug';
-          
-          // Tool usage
+
           if (subsystem === 'agent/embedded' && message.includes('tool ')) {
             const toolMatch = message.match(/tool=(\w+)/);
             const actionMatch = message.match(/tool (start|end)/);
@@ -1506,12 +1554,10 @@ const server = http.createServer(async (req, res) => {
                 ts: parsed.time,
                 kind: 'tool',
                 summary: `${actionMatch[1] === 'start' ? '▶' : '✓'} ${toolMatch[1]}`,
-                level: level
+                level
               });
             }
-          }
-          // Session state changes
-          else if (subsystem === 'diagnostic' && message.includes('session state')) {
+          } else if (subsystem === 'diagnostic' && message.includes('session state')) {
             const stateMatch = message.match(/new=(\w+)/);
             if (stateMatch) {
               events.push({
@@ -1519,34 +1565,29 @@ const server = http.createServer(async (req, res) => {
                 ts: parsed.time,
                 kind: 'session',
                 summary: `Session ${stateMatch[1]}`,
-                level: level
+                level
               });
             }
-          }
-          // Cron jobs
-          else if (subsystem === 'cron' || message.includes('cron')) {
+          } else if (subsystem === 'cron' || message.includes('cron')) {
             events.push({
               id: parsed.time + '-cron',
               ts: parsed.time,
               kind: 'cron',
               summary: message.slice(0, 60),
-              level: level
+              level
             });
-          }
-          // Warnings and errors (skip version mismatch warnings)
-          else if ((level === 'warn' || level === 'error') && !message.includes('Config was last written by a newer OpenClaw')) {
+          } else if ((level === 'warn' || level === 'error') && !message.includes('Config was last written by a newer OpenClaw')) {
             events.push({
               id: parsed.time + '-warn',
               ts: parsed.time,
               kind: 'alert',
               summary: message.slice(0, 80),
-              level: level
+              level
             });
           }
         } catch {}
       }
-      
-      // Return most recent 30 events
+
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(events.slice(-30).reverse(), null, 2));
