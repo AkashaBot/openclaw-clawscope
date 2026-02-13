@@ -1840,6 +1840,7 @@ const server = http.createServer(async (req, res) => {
     select, input[type="text"] { padding: 0.4rem 0.6rem; border-radius: 0.375rem; border: 1px solid #374151; background: #0b1120; color: #e5e7eb; font-size: 0.85rem; }
     .btn { background: #111827; border: 1px solid #374151; color: #e5e7eb; padding: 0.45rem 0.8rem; border-radius: 0.375rem; cursor: pointer; font-size: 0.8rem; }
     .btn:hover { background: #1f2937; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-primary { background: #2563eb; border-color: #2563eb; }
     .btn-primary:hover { background: #1d4ed8; }
     .hint { font-size: 0.75rem; color: #6b7280; }
@@ -1848,6 +1849,8 @@ const server = http.createServer(async (req, res) => {
     .status-warn { background: rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); }
     .config-block { background: #020617; border-radius: 0.375rem; padding: 0.75rem; margin-top: 0.5rem; }
     pre { margin: 0; font-size: 0.75rem; color: #9ca3af; white-space: pre-wrap; }
+    .overlay { position: fixed; inset: 0; background: rgba(2,6,23,0.75); display: none; align-items: center; justify-content: center; z-index: 999; }
+    .overlay .box { background: #0b1120; border: 1px solid #1f2937; padding: 1rem 1.25rem; border-radius: 0.5rem; color: #e5e7eb; font-size: 0.9rem; }
   </style>
 </head>
 <body>
@@ -1901,7 +1904,7 @@ const server = http.createServer(async (req, res) => {
 
       <div class="settings-card">
         <h3>💾 Save</h3>
-        <p>Persist these settings to <code>clawscope.settings.json</code>.</p>
+        <p>Persist these settings to <code>clawscope.settings.json</code> and apply to OpenClaw (restart gateway).</p>
         <button class="btn btn-primary" id="saveBtn">Save settings</button>
         <span id="saveStatus" class="status-pill status-warn" style="margin-left:0.5rem; display:none;">…</span>
       </div>
@@ -1915,6 +1918,7 @@ const server = http.createServer(async (req, res) => {
       </div>
     </div>
   </main>
+  <div class="overlay" id="restartOverlay"><div class="box">Restarting OpenClaw gateway… please wait</div></div>
   <script>
     async function loadSettings() {
       const res = await fetch('/settings/config');
@@ -1930,6 +1934,11 @@ const server = http.createServer(async (req, res) => {
         mode: document.getElementById('searchMode').value,
         topK: document.getElementById('topK').value ? parseInt(document.getElementById('topK').value, 10) : undefined
       };
+      const btn = document.getElementById('saveBtn');
+      const overlay = document.getElementById('restartOverlay');
+      btn.disabled = true;
+      overlay.style.display = 'flex';
+
       const res = await fetch('/settings/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1938,13 +1947,14 @@ const server = http.createServer(async (req, res) => {
       const status = document.getElementById('saveStatus');
       status.style.display = 'inline-block';
       if (res.ok) {
-        status.textContent = 'Saved';
+        status.textContent = 'Saved + restart';
         status.className = 'status-pill status-ok';
       } else {
         status.textContent = 'Error';
         status.className = 'status-pill status-warn';
       }
       setTimeout(() => { status.style.display = 'none'; }, 2000);
+      setTimeout(() => { overlay.style.display = 'none'; btn.disabled = false; }, 4000);
     }
 
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
