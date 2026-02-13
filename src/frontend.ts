@@ -1980,7 +1980,9 @@ const server = http.createServer(async (req, res) => {
         const res = await fetch('/facts/extract', { method: 'POST' });
         const data = await res.json();
         if (res.ok) {
-          status.textContent = 'Done (' + (data.factsInserted || 0) + ' facts)';
+          const facts = data.factsInserted || 0;
+          const tags = data.tagsUpdated || 0;
+          status.textContent = 'Done (' + facts + ' facts, ' + tags + ' tags)';
           status.className = 'status-pill status-ok';
         } else {
           status.textContent = 'Error';
@@ -2094,9 +2096,24 @@ const server = http.createServer(async (req, res) => {
         itemsProcessed++;
       }
 
+      // Tag items with facts
+      const factRows = db.prepare('SELECT DISTINCT source_item_id as id FROM facts WHERE source_item_id IS NOT NULL').all() as any[];
+      let tagsUpdated = 0;
+      for (const r of factRows) {
+        const id = String(r.id);
+        const item = db.prepare('SELECT tags FROM items WHERE id = ?').get(id) as { tags?: string } | undefined;
+        if (!item) continue;
+        const tags = (item.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+        if (!tags.includes('fact')) {
+          tags.push('fact');
+          db.prepare('UPDATE items SET tags = ? WHERE id = ?').run(tags.join(','), id);
+          tagsUpdated++;
+        }
+      }
+
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok: true, itemsProcessed, factsInserted }));
+      res.end(JSON.stringify({ ok: true, itemsProcessed, factsInserted, tagsUpdated }));
     } catch (err: any) {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
