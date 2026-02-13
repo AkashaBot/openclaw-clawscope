@@ -4,6 +4,7 @@
 import http from 'http';
 import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs';
 import { exec as cpExec } from 'child_process';
 function promisifyExec(fn: any) {
   return (...args: any[]) =>
@@ -1411,6 +1412,22 @@ async function fetchActivityFromPlugin(limit = 100): Promise<any> {
   }
 }
 
+const SETTINGS_PATH = process.env.CLAWSCOPE_SETTINGS_PATH || path.join(process.cwd(), 'clawscope.settings.json');
+
+function loadLocalSettings(): any {
+  try {
+    if (!fs.existsSync(SETTINGS_PATH)) return {};
+    const raw = fs.readFileSync(SETTINGS_PATH, 'utf8');
+    return JSON.parse(raw || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalSettings(data: any) {
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf8');
+}
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     res.statusCode = 400;
@@ -1799,14 +1816,17 @@ const server = http.createServer(async (req, res) => {
     .settings-card { background: #111827; border: 1px solid #1f2937; border-radius: 0.5rem; padding: 1rem; }
     .settings-card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; color: #e5e7eb; display: flex; align-items: center; gap: 0.5rem; }
     .settings-card p { margin: 0 0 0.5rem; font-size: 0.85rem; color: #9ca3af; }
-    .option-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid #1f2937; }
-    .option-row:last-child { border-bottom: none; }
-    .option-label { flex: 1; }
-    .option-name { font-size: 0.85rem; color: #e5e7eb; font-weight: 500; }
-    .option-desc { font-size: 0.75rem; color: #6b7280; margin-top: 0.15rem; }
-    .option-value { font-size: 0.8rem; color: #22c55e; background: rgba(34,197,94,0.1); padding: 0.25rem 0.5rem; border-radius: 0.25rem; }
-    .option-value.default { color: #f59e0b; background: rgba(245,158,11,0.1); }
-    code { background: #1f2937; padding: 0.15rem 0.3rem; border-radius: 0.25rem; font-size: 0.8rem; color: #fbbf24; }
+    .field-row { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.4rem 0; }
+    label { font-size: 0.8rem; color: #9ca3af; }
+    select, input[type="text"] { padding: 0.4rem 0.6rem; border-radius: 0.375rem; border: 1px solid #374151; background: #0b1120; color: #e5e7eb; font-size: 0.85rem; }
+    .btn { background: #111827; border: 1px solid #374151; color: #e5e7eb; padding: 0.45rem 0.8rem; border-radius: 0.375rem; cursor: pointer; font-size: 0.8rem; }
+    .btn:hover { background: #1f2937; }
+    .btn-primary { background: #2563eb; border-color: #2563eb; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .hint { font-size: 0.75rem; color: #6b7280; }
+    .status-pill { display:inline-block; padding:0.2rem 0.5rem; border-radius:999px; font-size:0.7rem; }
+    .status-ok { background: rgba(34,197,94,0.15); color:#22c55e; border:1px solid rgba(34,197,94,0.3); }
+    .status-warn { background: rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); }
     .config-block { background: #020617; border-radius: 0.375rem; padding: 0.75rem; margin-top: 0.5rem; }
     pre { margin: 0; font-size: 0.75rem; color: #9ca3af; white-space: pre-wrap; }
   </style>
@@ -1824,71 +1844,47 @@ const server = http.createServer(async (req, res) => {
   </header>
   <div class="health-bar">
     <span class="health-dot ok"></span>
-    <span>Memory plugin configuration</span>
+    <span>Local ClawScope settings (no OpenClaw restart)</span>
   </div>
   <main>
     <div class="settings-grid">
       <div class="settings-card">
         <h3>🧠 Fact Extraction Mode</h3>
         <p>Controls how facts are extracted from captured messages for the Knowledge Graph.</p>
-        
-        <div class="option-row">
-          <div class="option-label">
-            <div class="option-name"><code>extractionMode: "simple"</code></div>
-            <div class="option-desc">Regex-based pattern matching. Fast, zero dependencies, but limited to common patterns (works at, lives in, etc.).</div>
-          </div>
-          <div class="option-value default">Default</div>
-        </div>
-        
-        <div class="option-row">
-          <div class="option-label">
-            <div class="option-name"><code>extractionMode: "ner"</code></div>
-            <div class="option-desc">Transformers.js NER with BERT model (~400MB). Detects entities (people, orgs, locations) and infers relations. Better quality, first-run downloads model.</div>
-          </div>
-          <div class="option-value">Recommended</div>
-        </div>
-        
-        <div class="option-row">
-          <div class="option-label">
-            <div class="option-name"><code>extractionMode: "hybrid"</code></div>
-            <div class="option-desc">Combines simple + NER. Maximum coverage, slightly slower.</div>
-          </div>
-          <div class="option-value">Best coverage</div>
-        </div>
-        
-        <div class="config-block">
-          <p style="margin:0 0 0.5rem;font-size:0.8rem;color:#9ca3af;">Configure in your OpenClaw config:</p>
-          <pre>{
-  "plugins": {
-    "memory-offline-sqlite": {
-      "extractionMode": "ner"
-    }
-  }
-}</pre>
+        <div class="field-row">
+          <label for="extractionMode">extractionMode</label>
+          <select id="extractionMode">
+            <option value="simple">simple (regex)</option>
+            <option value="ner">ner (BERT)</option>
+            <option value="hybrid">hybrid (simple + ner)</option>
+          </select>
+          <div class="hint">Saved locally for ClawScope only.</div>
         </div>
       </div>
-      
+
       <div class="settings-card">
         <h3>🔍 Search Mode</h3>
         <p>Controls how memory search works.</p>
-        
-        <div class="option-row">
-          <div class="option-label">
-            <div class="option-name"><code>mode: "lexical"</code></div>
-            <div class="option-desc">Full-text search (FTS5). Fast, no embeddings required.</div>
-          </div>
-          <div class="option-value default">Default</div>
+        <div class="field-row">
+          <label for="searchMode">mode</label>
+          <select id="searchMode">
+            <option value="lexical">lexical</option>
+            <option value="hybrid">hybrid</option>
+          </select>
         </div>
-        
-        <div class="option-row">
-          <div class="option-label">
-            <div class="option-name"><code>mode: "hybrid"</code></div>
-            <div class="option-desc">Combines lexical + semantic embeddings (requires Ollama). Better for conceptual queries.</div>
-          </div>
-          <div class="option-value">Recommended</div>
+        <div class="field-row">
+          <label for="topK">topK</label>
+          <input id="topK" type="text" placeholder="e.g. 5" />
         </div>
       </div>
-      
+
+      <div class="settings-card">
+        <h3>💾 Save</h3>
+        <p>Persist these settings to <code>clawscope.settings.json</code>.</p>
+        <button class="btn btn-primary" id="saveBtn">Save settings</button>
+        <span id="saveStatus" class="status-pill status-warn" style="margin-left:0.5rem; display:none;">…</span>
+      </div>
+
       <div class="settings-card">
         <h3>📊 Current Status</h3>
         <p>Loaded from memory database.</p>
@@ -1899,8 +1895,42 @@ const server = http.createServer(async (req, res) => {
     </div>
   </main>
   <script>
+    async function loadSettings() {
+      const res = await fetch('/settings/config');
+      const data = await res.json();
+      document.getElementById('extractionMode').value = data.extractionMode || 'simple';
+      document.getElementById('searchMode').value = data.mode || 'hybrid';
+      document.getElementById('topK').value = data.topK || '';
+    }
+
+    async function saveSettings() {
+      const payload = {
+        extractionMode: document.getElementById('extractionMode').value,
+        mode: document.getElementById('searchMode').value,
+        topK: document.getElementById('topK').value ? parseInt(document.getElementById('topK').value, 10) : undefined
+      };
+      const res = await fetch('/settings/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const status = document.getElementById('saveStatus');
+      status.style.display = 'inline-block';
+      if (res.ok) {
+        status.textContent = 'Saved';
+        status.className = 'status-pill status-ok';
+      } else {
+        status.textContent = 'Error';
+        status.className = 'status-pill status-warn';
+      }
+      setTimeout(() => { status.style.display = 'none'; }, 2000);
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', saveSettings);
+
     (async () => {
       try {
+        await loadSettings();
         const res = await fetch('/settings/status');
         const data = await res.json();
         document.getElementById('status-text').textContent = JSON.stringify(data, null, 2);
@@ -1917,6 +1947,34 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Settings config API (local)
+  if (req.method === 'GET' && url.pathname === '/settings/config') {
+    const cfg = loadLocalSettings();
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(cfg, null, 2));
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/settings/save') {
+    try {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        const data = body ? JSON.parse(body) : {};
+        saveLocalSettings(data);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: true }));
+      });
+    } catch (err: any) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: err?.message || 'save failed' }));
+    }
+    return;
+  }
+
   // Settings status API
   if (req.method === 'GET' && url.pathname === '/settings/status') {
     try {
@@ -1929,6 +1987,8 @@ const server = http.createServer(async (req, res) => {
       const itemsCount = db.prepare('SELECT COUNT(*) as count FROM items').get() as { count: number };
       
       db.close();
+
+      const cfg = loadLocalSettings();
       
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
@@ -1938,8 +1998,7 @@ const server = http.createServer(async (req, res) => {
           facts: factsCount.count,
         },
         graph: stats,
-        extractionMode: 'Configured in OpenClaw config (see above)',
-        searchMode: 'hybrid',
+        settings: cfg,
       }, null, 2));
     } catch (err: any) {
       res.statusCode = 500;
