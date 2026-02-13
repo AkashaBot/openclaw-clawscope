@@ -1980,7 +1980,7 @@ const server = http.createServer(async (req, res) => {
         const res = await fetch('/facts/extract', { method: 'POST' });
         const data = await res.json();
         if (res.ok) {
-          status.textContent = `Done (${data.factsInserted || 0} facts)`;
+          status.textContent = 'Done (' + (data.factsInserted || 0) + ' facts)';
           status.className = 'status-pill status-ok';
         } else {
           status.textContent = 'Error';
