@@ -1428,6 +1428,24 @@ function saveLocalSettings(data: any) {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 
+function patchOpenclawConfig(patch: any) {
+  const ocPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+  const raw = fs.readFileSync(ocPath, 'utf8');
+  const cfg = JSON.parse(raw || '{}');
+
+  cfg.plugins = cfg.plugins || {};
+  cfg.plugins.entries = cfg.plugins.entries || {};
+  cfg.plugins.entries['memory-offline-sqlite'] = cfg.plugins.entries['memory-offline-sqlite'] || { enabled: true, config: {} };
+  cfg.plugins.entries['memory-offline-sqlite'].config = cfg.plugins.entries['memory-offline-sqlite'].config || {};
+
+  const memCfg = cfg.plugins.entries['memory-offline-sqlite'].config;
+  if (patch.mode) memCfg.mode = patch.mode;
+  if (typeof patch.topK === 'number') memCfg.topK = patch.topK;
+  if (patch.extractionMode) memCfg.extractionMode = patch.extractionMode;
+
+  fs.writeFileSync(ocPath, JSON.stringify(cfg, null, 2), 'utf8');
+}
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     res.statusCode = 400;
@@ -1963,12 +1981,25 @@ const server = http.createServer(async (req, res) => {
     try {
       let body = '';
       req.on('data', (chunk) => (body += chunk));
-      req.on('end', () => {
-        const data = body ? JSON.parse(body) : {};
-        saveLocalSettings(data);
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ok: true }));
+      req.on('end', async () => {
+        try {
+          const data = body ? JSON.parse(body) : {};
+          saveLocalSettings(data);
+          // Apply to OpenClaw config (reproducible via UI)
+          patchOpenclawConfig(data);
+          // Restart gateway to apply
+          try {
+            await exec('openclaw gateway restart', { cwd: process.cwd() });
+          } catch {}
+
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: true, restarted: true }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: e?.message || 'save failed' }));
+        }
       });
     } catch (err: any) {
       res.statusCode = 500;
