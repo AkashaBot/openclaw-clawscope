@@ -131,6 +131,7 @@ const timelineHtml = String.raw`<!DOCTYPE html>
       <a href="/">🔍 Search</a>
       <a href="/timeline" class="active">📅 Timeline</a>
       <a href="/graph">🕸️ Graph</a>
+      <a href="/settings">⚙️ Settings</a>
     </nav>
   </header>
   <div class="health-bar" id="health-bar">
@@ -547,6 +548,7 @@ const graphHtml = String.raw`<!DOCTYPE html>
       <a href="/" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🔍 Search</a>
       <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
       <a href="/graph" style="color:#e5e7eb;text-decoration:none;background:#111827;padding:0.25rem 0.5rem;border-radius:0.25rem;font-size:0.85rem;">🕸️ Graph</a>
+      <a href="/settings" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">⚙️ Settings</a>
     </nav>
   </header>
   <div class="controls">
@@ -806,6 +808,7 @@ const html = String.raw`<!DOCTYPE html>
       <a href="/" style="color:#e5e7eb;text-decoration:none;background:#111827;padding:0.25rem 0.5rem;border-radius:0.25rem;font-size:0.85rem;">🔍 Search</a>
       <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
       <a href="/graph" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🕸️ Graph</a>
+      <a href="/settings" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">⚙️ Settings</a>
       <span style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;">ClawScope</span>
     </nav>
   </header>
@@ -1693,6 +1696,169 @@ const server = http.createServer(async (req, res) => {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ error: err?.message || 'graph-data failed' }));
+    }
+    return;
+  }
+
+  // Settings page
+  if (req.method === 'GET' && url.pathname === '/settings') {
+    const settingsHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenClaw ClawScope – Settings</title>
+  <style>${sharedStyles}
+    .settings-grid { display: grid; gap: 1rem; max-width: 800px; }
+    .settings-card { background: #111827; border: 1px solid #1f2937; border-radius: 0.5rem; padding: 1rem; }
+    .settings-card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; color: #e5e7eb; display: flex; align-items: center; gap: 0.5rem; }
+    .settings-card p { margin: 0 0 0.5rem; font-size: 0.85rem; color: #9ca3af; }
+    .option-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid #1f2937; }
+    .option-row:last-child { border-bottom: none; }
+    .option-label { flex: 1; }
+    .option-name { font-size: 0.85rem; color: #e5e7eb; font-weight: 500; }
+    .option-desc { font-size: 0.75rem; color: #6b7280; margin-top: 0.15rem; }
+    .option-value { font-size: 0.8rem; color: #22c55e; background: rgba(34,197,94,0.1); padding: 0.25rem 0.5rem; border-radius: 0.25rem; }
+    .option-value.default { color: #f59e0b; background: rgba(245,158,11,0.1); }
+    code { background: #1f2937; padding: 0.15rem 0.3rem; border-radius: 0.25rem; font-size: 0.8rem; color: #fbbf24; }
+    .config-block { background: #020617; border-radius: 0.375rem; padding: 0.75rem; margin-top: 0.5rem; }
+    pre { margin: 0; font-size: 0.75rem; color: #9ca3af; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚙️ Settings</h1>
+    <nav style="display:flex;gap:0.75rem;align-items:center;">
+      <a href="/" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🔍 Search</a>
+      <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
+      <a href="/graph" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🕸️ Graph</a>
+      <a href="/settings" style="color:#e5e7eb;text-decoration:none;background:#111827;padding:0.25rem 0.5rem;border-radius:0.25rem;font-size:0.85rem;">⚙️ Settings</a>
+      <span style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;">ClawScope</span>
+    </nav>
+  </header>
+  <div class="health-bar">
+    <span class="health-dot ok"></span>
+    <span>Memory plugin configuration</span>
+  </div>
+  <main>
+    <div class="settings-grid">
+      <div class="settings-card">
+        <h3>🧠 Fact Extraction Mode</h3>
+        <p>Controls how facts are extracted from captured messages for the Knowledge Graph.</p>
+        
+        <div class="option-row">
+          <div class="option-label">
+            <div class="option-name"><code>extractionMode: "simple"</code></div>
+            <div class="option-desc">Regex-based pattern matching. Fast, zero dependencies, but limited to common patterns (works at, lives in, etc.).</div>
+          </div>
+          <div class="option-value default">Default</div>
+        </div>
+        
+        <div class="option-row">
+          <div class="option-label">
+            <div class="option-name"><code>extractionMode: "ner"</code></div>
+            <div class="option-desc">Transformers.js NER with BERT model (~400MB). Detects entities (people, orgs, locations) and infers relations. Better quality, first-run downloads model.</div>
+          </div>
+          <div class="option-value">Recommended</div>
+        </div>
+        
+        <div class="option-row">
+          <div class="option-label">
+            <div class="option-name"><code>extractionMode: "hybrid"</code></div>
+            <div class="option-desc">Combines simple + NER. Maximum coverage, slightly slower.</div>
+          </div>
+          <div class="option-value">Best coverage</div>
+        </div>
+        
+        <div class="config-block">
+          <p style="margin:0 0 0.5rem;font-size:0.8rem;color:#9ca3af;">Configure in your OpenClaw config:</p>
+          <pre>{
+  "plugins": {
+    "memory-offline-sqlite": {
+      "extractionMode": "ner"
+    }
+  }
+}</pre>
+        </div>
+      </div>
+      
+      <div class="settings-card">
+        <h3>🔍 Search Mode</h3>
+        <p>Controls how memory search works.</p>
+        
+        <div class="option-row">
+          <div class="option-label">
+            <div class="option-name"><code>mode: "lexical"</code></div>
+            <div class="option-desc">Full-text search (FTS5). Fast, no embeddings required.</div>
+          </div>
+          <div class="option-value default">Default</div>
+        </div>
+        
+        <div class="option-row">
+          <div class="option-label">
+            <div class="option-name"><code>mode: "hybrid"</code></div>
+            <div class="option-desc">Combines lexical + semantic embeddings (requires Ollama). Better for conceptual queries.</div>
+          </div>
+          <div class="option-value">Recommended</div>
+        </div>
+      </div>
+      
+      <div class="settings-card">
+        <h3>📊 Current Status</h3>
+        <p>Loaded from memory database.</p>
+        <div id="status-info" class="config-block">
+          <pre id="status-text">Loading...</pre>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    (async () => {
+      try {
+        const res = await fetch('/settings/status');
+        const data = await res.json();
+        document.getElementById('status-text').textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        document.getElementById('status-text').textContent = 'Error: ' + err.message;
+      }
+    })();
+  </script>
+</body>
+</html>`;
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(settingsHtml);
+    return;
+  }
+
+  // Settings status API
+  if (req.method === 'GET' && url.pathname === '/settings/status') {
+    try {
+      const dbPath = path.join(os.homedir(), '.openclaw', 'memory', 'offline.sqlite');
+      const db = new Database(dbPath);
+      db.pragma('journal_mode = WAL');
+      
+      const stats = getGraphStats(db);
+      const factsCount = db.prepare('SELECT COUNT(*) as count FROM facts').get() as { count: number };
+      const itemsCount = db.prepare('SELECT COUNT(*) as count FROM items').get() as { count: number };
+      
+      db.close();
+      
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
+        memory: {
+          items: itemsCount.count,
+          facts: factsCount.count,
+        },
+        graph: stats,
+        extractionMode: 'Configured in OpenClaw config (see above)',
+        searchMode: 'hybrid',
+      }, null, 2));
+    } catch (err: any) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: err?.message || 'status failed' }));
     }
     return;
   }
