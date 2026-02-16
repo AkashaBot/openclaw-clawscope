@@ -134,6 +134,7 @@ const timelineHtml = String.raw`<!DOCTYPE html>
       <a href="/timeline" class="active">📅 Timeline</a>
       <a href="/graph">🕸️ Graph</a>
       <a href="/settings">⚙️ Settings</a>
+      <a href="/db">🗄️ DB</a>
     </nav>
   </header>
   <div class="health-bar" id="health-bar">
@@ -551,6 +552,7 @@ const graphHtml = String.raw`<!DOCTYPE html>
       <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
       <a href="/graph" style="color:#e5e7eb;text-decoration:none;background:#111827;padding:0.25rem 0.5rem;border-radius:0.25rem;font-size:0.85rem;">🕸️ Graph</a>
       <a href="/settings" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">⚙️ Settings</a>
+      <a href="/db" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🗄️ DB</a>
     </nav>
   </header>
   <div class="controls">
@@ -811,6 +813,7 @@ const html = String.raw`<!DOCTYPE html>
       <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
       <a href="/graph" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🕸️ Graph</a>
       <a href="/settings" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">⚙️ Settings</a>
+      <a href="/db" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🗄️ DB</a>
       <span style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;">ClawScope</span>
     </nav>
   </header>
@@ -1447,6 +1450,144 @@ function patchOpenclawConfig(patch: any) {
   fs.writeFileSync(ocPath, JSON.stringify(cfg, null, 2), 'utf8');
 }
 
+const dbHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenClaw ClawScope – DB</title>
+  <style>${sharedStyles}
+    .controls { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap; }
+    .controls button, .controls select { padding:0.4rem 0.6rem; border-radius:0.375rem; border:1px solid #374151; background:#111827; color:#e5e7eb; cursor:pointer; font-size:0.8rem; }
+    .controls button:hover { background:#1f2937; }
+    table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+    th, td { text-align:left; padding:0.5rem 0.6rem; border-bottom:1px solid #111827; vertical-align:top; }
+    th { color:#9ca3af; font-weight:600; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.75rem; color:#9ca3af; }
+    .tag { display:inline-block; padding:0.1rem 0.4rem; border-radius:999px; border:1px solid #374151; color:#e5e7eb; font-size:0.65rem; margin-right:0.2rem; }
+    .snippet { color:#e5e7eb; }
+    .muted { color:#6b7280; font-size:0.75rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🗄️ DB View</h1>
+    <nav style="display:flex;gap:0.75rem;align-items:center;">
+      <a href="/" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🔍 Search</a>
+      <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
+      <a href="/graph" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🕸️ Graph</a>
+      <a href="/settings" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">⚙️ Settings</a>
+      <a href="/db" style="color:#e5e7eb;text-decoration:none;background:#111827;padding:0.25rem 0.5rem;border-radius:0.25rem;font-size:0.85rem;">🗄️ DB</a>
+      <span style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;">ClawScope</span>
+    </nav>
+  </header>
+  <div class="health-bar">
+    <span class="health-dot ok"></span>
+    <span>Live view of offline.sqlite (items table)</span>
+  </div>
+  <main>
+    <div class="controls">
+      <button id="prev">◀ Prev</button>
+      <button id="next">Next ▶</button>
+      <label class="muted">Limit</label>
+      <select id="limit">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+      <span class="muted" id="range"></span>
+      <button id="refresh">↻ Refresh</button>
+    </div>
+    <div style="overflow:auto; border:1px solid #111827; border-radius:0.5rem;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:140px;">Created</th>
+            <th style="width:120px;">Entity</th>
+            <th style="width:90px;">Kind</th>
+            <th style="width:140px;">Tags</th>
+            <th>Text</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="5" class="muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+  <script>
+    let offset = 0;
+    let limit = 50;
+    const rowsEl = document.getElementById('rows');
+    const rangeEl = document.getElementById('range');
+    const prevBtn = document.getElementById('prev');
+    const nextBtn = document.getElementById('next');
+    const limitSel = document.getElementById('limit');
+    const refreshBtn = document.getElementById('refresh');
+
+    function fmtDate(v) {
+      try {
+        const ts = typeof v === 'number' ? v : Number(v);
+        const d = new Date(isNaN(ts) ? v : ts);
+        if (isNaN(d.getTime())) return '' + v;
+        return d.toLocaleString();
+      } catch { return '' + v; }
+    }
+
+    function render(items, total) {
+      if (!items.length) {
+        rowsEl.innerHTML = '<tr><td colspan="5" class="muted">No rows.</td></tr>';
+        rangeEl.textContent = '0 / ' + total;
+        prevBtn.disabled = offset === 0;
+        nextBtn.disabled = true;
+        return;
+      }
+      rowsEl.innerHTML = items.map(item => {
+        const tags = (item.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+        const tagHtml = tags.map(t => '<span class="tag">' + t + '</span>').join('');
+        const text = (item.text || '').replace(/\s+/g, ' ').slice(0, 220);
+        return '<tr>' +
+          '<td class="mono">' + fmtDate(item.created_at) + '</td>' +
+          '<td class="mono">' + (item.entity_id || '') + '</td>' +
+          '<td class="mono">' + (item.kind || '') + '</td>' +
+          '<td>' + tagHtml + '</td>' +
+          '<td class="snippet">' + text + '</td>' +
+        '</tr>';
+      }).join('');
+      const start = offset + 1;
+      const end = Math.min(offset + limit, total);
+      rangeEl.textContent = start + '-' + end + ' / ' + total;
+      prevBtn.disabled = offset === 0;
+      nextBtn.disabled = offset + limit >= total;
+    }
+
+    async function load() {
+      rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Loading...</td></tr>';
+      const res = await fetch('/db/items?limit=' + limit + '&offset=' + offset);
+      const data = await res.json();
+      render(data.items || [], data.total || 0);
+    }
+
+    prevBtn.addEventListener('click', () => {
+      offset = Math.max(0, offset - limit);
+      load();
+    });
+    nextBtn.addEventListener('click', () => {
+      offset = offset + limit;
+      load();
+    });
+    limitSel.addEventListener('change', () => {
+      limit = parseInt(limitSel.value, 10);
+      offset = 0;
+      load();
+    });
+    refreshBtn.addEventListener('click', load);
+
+    load();
+  </script>
+</body>
+</html>`;
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     res.statusCode = 400;
@@ -1823,6 +1964,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // DB table view
+  if (req.method === 'GET' && url.pathname === '/db') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(dbHtml);
+    return;
+  }
+
+  // DB items endpoint
+  if (req.method === 'GET' && url.pathname === '/db/items') {
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 500);
+    const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10), 0);
+
+    try {
+      const dbPath = path.join(os.homedir(), '.openclaw', 'memory', 'offline.sqlite');
+      const db = openDb(dbPath);
+      const totalRow: any = db.prepare('SELECT COUNT(*) as count FROM items').get();
+      const total = Number(totalRow?.count || 0);
+      const items = db
+        .prepare('SELECT id, created_at, entity_id, source, tags, text FROM items ORDER BY created_at DESC LIMIT ? OFFSET ?')
+        .all(limit, offset);
+      db.close?.();
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ items, total, limit, offset }, null, 2));
+    } catch (err: any) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: err?.message || 'db items failed' }));
+    }
+    return;
+  }
+
   // Settings page
   if (req.method === 'GET' && url.pathname === '/settings') {
     const settingsHtml = `<!DOCTYPE html>
@@ -1862,6 +2037,7 @@ const server = http.createServer(async (req, res) => {
       <a href="/timeline" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">📅 Timeline</a>
       <a href="/graph" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🕸️ Graph</a>
       <a href="/settings" style="color:#e5e7eb;text-decoration:none;background:#111827;padding:0.25rem 0.5rem;border-radius:0.25rem;font-size:0.85rem;">⚙️ Settings</a>
+      <a href="/db" style="color:#9ca3af;text-decoration:none;padding:0.25rem 0.5rem;font-size:0.85rem;">🗄️ DB</a>
       <span style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;">ClawScope</span>
     </nav>
   </header>

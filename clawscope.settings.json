@@ -1,0 +1,5 @@
+{
+  "extractionMode": "hybrid",
+  "mode": "lexical",
+  "topK": 10
+}
