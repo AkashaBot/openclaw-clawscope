@@ -2,8 +2,39 @@
 // ClawScope server with UI + API
 
 import http from 'node:http';
-import { OfflineSqliteSearchBackend } from './offline-sqlite-backend.js';
 import type { SearchBackend } from './search.js';
+
+// Dynamic import helper to load TS backend without .js shim
+let backendPromise: Promise<SearchBackend> | null = null;
+async function getBackend(): Promise<SearchBackend> {
+  if (!backendPromise) {
+    backendPromise = (async () => {
+      try {
+        const mod = await import('./offline-sqlite-backend.js');
+        const Clazz = (mod as any).OfflineSqliteSearchBackend ?? (mod as any).default;
+        if (!Clazz) throw new Error('No export found for OfflineSqliteSearchBackend');
+        console.log('Dynamic backend loaded from offline-sqlite-backend.ts:', Clazz.name || 'OfflineSqliteSearchBackend');
+        return new Clazz() as SearchBackend;
+      } catch (e) {
+        console.error('Failed to load TS backend dynamically:', e);
+        throw e;
+      }
+    })();
+  }
+  return backendPromise;
+}
+
+// We'll instantiate backend at runtime
+let backendInstance: SearchBackend | null = null;
+async function ensureBackend() {
+  if (!backendInstance) {
+    backendInstance = await getBackend();
+  }
+  // Log when backend is ready
+  console.log('Backend ready:', backendInstance?.constructor?.name ?? 'Unknown');
+  return backendInstance!;
+}
+
 
 // Handle uncaught errors
 process.on('uncaughtException', (err) => {
@@ -16,8 +47,9 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
-// Primary backend: real offline-sqlite search over the local memory database.
-const backend: SearchBackend = new OfflineSqliteSearchBackend();
+// Primary backend will be loaded dynamically at runtime
+// const backend: SearchBackend = new OfflineSqliteSearchBackend();
+
 
 const html = `<!DOCTYPE html>
 <html lang="en">
@@ -106,8 +138,9 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, 'http://localhost');
 
-  // Serve UI at root
-  if (req.method === 'GET' && url.pathname === '/') {
+  // Serve UI for SPA routes (root + common UI paths)
+  const uiRoutes = new Set(['/', '/timeline', '/graph', '/settings', '/db']);
+  if (req.method === 'GET' && uiRoutes.has(url.pathname)) {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end(html);
@@ -121,6 +154,7 @@ const server = http.createServer(async (req, res) => {
     const limit = parseInt(url.searchParams.get('limit') || '20', 10);
 
     try {
+      const backend = await ensureBackend();
       const items = await backend.search({ query: q, mode, limit });
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
@@ -137,7 +171,7 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
-export function startServer(port = 3099) {
+export function startServer(port = 3101) {
   server.listen(port, () => {
     console.log(`Mission Control listening on http://localhost:${port}`);
   });

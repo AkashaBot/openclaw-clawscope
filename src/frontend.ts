@@ -19,14 +19,16 @@ function promisifyExec(fn: any) {
       });
     });
 }
-import { OfflineSqliteSearchBackend } from './offline-sqlite-backend.js';
 import type { SearchBackend, SearchMode } from './search.js';
-import { InMemoryActivityBackend } from './activity-backend.js';
-import { InMemoryTaskBackend } from './tasks-backend.js';
 import { getGraphStats, getEntityGraph, getAllFacts, exportGraphJson, extractFactsSimple, insertFact, deleteFactsBySourceItem, openDb, initSchema, runMigrations } from '@akashabot/openclaw-memory-offline-core';
 import Database from 'better-sqlite3';
 
 const exec = promisifyExec(cpExec);
+
+// Dynamic imports to avoid .js resolution issue with ts-node-esm
+const { OfflineSqliteSearchBackend } = await import('./offline-sqlite-backend.js');
+const { InMemoryActivityBackend } = await import('./activity-backend.js');
+const { InMemoryTaskBackend } = await import('./tasks-backend.js');
 
 const backend: SearchBackend = new OfflineSqliteSearchBackend();
 const activityBackend = new InMemoryActivityBackend();
