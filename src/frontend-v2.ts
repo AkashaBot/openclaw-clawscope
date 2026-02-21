@@ -1469,11 +1469,33 @@ const server = http.createServer(async (req, res) => {
         graphData.nodes = Array.from(nodeMap.values());
       } else {
         // Build graph from all facts - pass limit to getAllFacts
+        const topN = Math.min(parseInt(url.searchParams.get('topN') || '50'), 200); // Default 50, max 200
         const facts = getAllFacts(db, undefined, limit);
+        
+        // First pass: count connections per entity
+        const entityCounts = new Map<string, number>();
+        for (const fact of facts) {
+          if (fact.confidence < minConf) continue;
+          entityCounts.set(fact.subject, (entityCounts.get(fact.subject) || 0) + 1);
+          entityCounts.set(fact.object, (entityCounts.get(fact.object) || 0) + 1);
+        }
+        
+        // Get top N entities by connection count
+        const topEntities = new Set(
+          [...entityCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, topN)
+            .map(([entity]) => entity)
+        );
+        
+        // Second pass: build graph only with top entities
         const nodeMap = new Map<string, { id: string; label: string }>();
         
         for (const fact of facts) {
           if (fact.confidence < minConf) continue;
+          
+          // Only include edges where both endpoints are in top entities
+          if (!topEntities.has(fact.subject) || !topEntities.has(fact.object)) continue;
           
           if (!nodeMap.has(fact.subject)) nodeMap.set(fact.subject, { id: fact.subject, label: fact.subject });
           if (!nodeMap.has(fact.object)) nodeMap.set(fact.object, { id: fact.object, label: fact.object });
